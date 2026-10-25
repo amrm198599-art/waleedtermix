@@ -10,6 +10,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +32,6 @@ jobs:
             if [ -z "$F" ]; then echo "settings.gradle.kts not found inside $Z"; exit 1; fi
             D=$(dirname "$F")
           fi
-          echo "Project dir: $D"
           echo "dir=$D" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
@@ -44,26 +48,18 @@ jobs:
         working-directory: ${{ steps.p.outputs.dir }}
         run: gradle assembleDebug --stacktrace
 
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+      - name: Decode and verify keystore
+        shell: bash
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/release.keystore" \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null \
+            && echo "Keystore OK" \
+            || { echo "Keystore/alias/password check FAILED"; exit 1; }
 
       - name: Build release APK (signed)
         working-directory: ${{ steps.p.outputs.dir }}
-        run: >
-          gradle assembleRelease --stacktrace
-          -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.keystore"
-          -Pandroid.injected.signing.store.password="${{ secrets.KEYSTORE_PASSWORD }}"
-          -Pandroid.injected.signing.key.alias="${{ secrets.KEY_ALIAS }}"
-          -Pandroid.injected.signing.key.password="${{ secrets.KEY_PASSWORD }}"
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: WaleedRemix-debug
-          path: ${{ steps.p.outputs.dir }}/app/build/outputs/apk/debug/*.apk
-
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: WaleedRemix-release-signed
-          path: ${{ steps.p.outputs.dir }}/app/build/outputs/apk/release/*.apk
+        shell: bash
+        run: |
+          gradle assembleRelease --stacktrace \
+            -Pandroid.injected.signing.s
