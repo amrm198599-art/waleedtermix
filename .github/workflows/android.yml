@@ -1,3 +1,20 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
       - name: Prepare web app
         run: |
           ls -la
@@ -16,3 +33,32 @@
           if [ -z "$ICON" ]; then echo "ERROR: app-icon.png not found"; exit 1; fi
           cp "$ICON" www/app-icon.png
           cp "$ICON" /tmp/app-icon.png
+      - name: Create Android project
+        run: |
+          npm init -y
+          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npx cap init "Arshif Waleed" com.waleed.arshef --web-dir=www
+          node -e "const f='capacitor.config.json';const c=require('./'+f);c.plugins={CapacitorHttp:{enabled:true}};require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+          npx cap add android
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <application#' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+      - name: Generate app icon
+        run: |
+          sudo apt-get update && sudo apt-get install -y imagemagick
+          RES=android/app/src/main/res
+          rm -f $RES/mipmap-anydpi-v26/ic_launcher.xml $RES/mipmap-anydpi-v26/ic_launcher_round.xml
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            name=${d%%:*}; size=${d##*:}
+            convert /tmp/app-icon.png -resize ${size}x${size} $RES/mipmap-$name/ic_launcher.png
+            convert /tmp/app-icon.png -resize ${size}x${size} $RES/mipmap-$name/ic_launcher_round.png
+            convert /tmp/app-icon.png -resize ${size}x${size} $RES/mipmap-$name/ic_launcher_foreground.png
+          done
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arshif-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
